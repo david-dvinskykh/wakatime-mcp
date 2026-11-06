@@ -15,7 +15,42 @@ Blocks on the same branch at most 60 s apart are merged. A branch named
 `Unknown` or an empty branch gives one row with an empty `start` and the
 summary total. Rows are sorted by start; rows without a start come last.
 
-## Install and add to Cursor in one command
+## Add to Cursor with npx (recommended)
+
+Add this to `~/.cursor/mcp.json` under `mcpServers` (or to `.cursor/mcp.json`
+in a project):
+
+```json
+"wakatime-durations": {
+  "command": "npx",
+  "args": ["-y", "wakatime-durations-mcp"]
+}
+```
+
+Nothing else to install besides Node. On first start the launcher downloads
+the binary for your OS and CPU from this repository's GitHub release, checks
+its SHA-256 against `checksums.txt` and caches it
+(`~/Library/Caches/wakatime-durations/<version>/` on macOS). Later starts use
+the cache. If no release binary is available but Go is installed, it builds the
+bundled source instead. Its own messages go to stderr; stdout is MCP only.
+
+CLI mode works the same way:
+`npx -y wakatime-durations-mcp -date 2026-11-06`.
+
+Launcher overrides: `WAKATIME_DURATIONS_BIN` (use this binary),
+`WAKATIME_DURATIONS_CACHE` (cache directory).
+
+### Publishing a version (maintainer)
+
+1. Set `version` in `package.json` (for example `0.1.0`).
+2. Push a matching tag: `git tag v0.1.0 && git push origin v0.1.0`.
+3. The `release` workflow tests, builds binaries for macOS (arm64, amd64),
+   Linux (amd64, arm64) and Windows (amd64), creates the GitHub release with
+   `checksums.txt` and runs `npm publish`. The npm step needs an `NPM_TOKEN`
+   repository secret (an npm automation token); without it the step is
+   skipped and only the GitHub release is made.
+
+## Install and add to Cursor in one command (Go)
 
 Needs Go 1.22+ (`brew install go`). This downloads, builds and installs the
 binary, then registers it in `~/.cursor/mcp.json` (other servers are kept and

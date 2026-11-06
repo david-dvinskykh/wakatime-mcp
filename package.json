@@ -1,0 +1,23 @@
+{
+  "name": "wakatime-durations-mcp",
+  "version": "0.1.0",
+  "description": "MCP server (stdio) with WakaTime coding intervals per project and branch, with start times",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/david-dvinskykh/wakatime-mcp.git"
+  },
+  "keywords": ["mcp", "wakatime", "cursor", "jira", "time-tracking"],
+  "bin": {
+    "wakatime-durations-mcp": "npm/launcher.js"
+  },
+  "files": [
+    "npm/launcher.js",
+    "wakatime-durations/go.mod",
+    "wakatime-durations/*.go",
+    "wakatime-durations/README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -3,10 +3,14 @@
 ## wakatime-durations
 
 WakaTime coding intervals with start times, per project and branch, as CSV or
-as an MCP server for Cursor. Install and register it in Cursor with one command:
+as an MCP server. Add it to Cursor (`~/.cursor/mcp.json`, under `mcpServers`):
 
-```bash
-GOBIN="$HOME/.local/bin" go install github.com/david-dvinskykh/wakatime-mcp/wakatime-durations@latest && "$HOME/.local/bin/wakatime-durations" -install-cursor
+```json
+"wakatime-durations": {
+  "command": "npx",
+  "args": ["-y", "wakatime-durations-mcp"]
+}
 ```
 
-Details: [wakatime-durations/README.md](wakatime-durations/README.md).
+Details, credentials and other install options:
+[wakatime-durations/README.md](wakatime-durations/README.md).
