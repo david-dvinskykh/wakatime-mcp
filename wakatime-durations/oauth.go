@@ -28,6 +28,7 @@ const (
 	defaultRedirectURI  = "http://127.0.0.1:8977/callback"
 	defaultScope        = "read_summaries,read_heartbeats"
 	loginTimeout        = 10 * time.Minute
+	pendingPath         = "/wakatime-durations/pending"
 )
 
 // errOAuthNotConfigured is returned when interactive sign-in is requested
@@ -168,9 +169,22 @@ func (m *LoginManager) Start() (*pendingLogin, error) {
 	if err != nil || ru.Scheme != "http" || !isLoopback(ru.Hostname()) {
 		return nil, fmt.Errorf("redirect URI %q must be http on 127.0.0.1 or localhost", c.RedirectURI)
 	}
+	timeout := c.Timeout
+	if timeout <= 0 {
+		timeout = loginTimeout
+	}
 	ln, err := net.Listen("tcp", net.JoinHostPort(ru.Hostname(), portOrDefault(ru)))
 	if err != nil {
-		return nil, fmt.Errorf("cannot listen for the sign-in redirect on %s: %w", ru.Host, err)
+		// Another wakatime-durations process (Cursor may run several) may
+		// already be waiting for the redirect. Join its sign-in: it saves the
+		// token to the shared token file, which this process then reads.
+		if u, jerr := joinRunningLogin(ru, c.AuthorizeURL); jerr == nil {
+			p := &pendingLogin{url: u, done: make(chan struct{})}
+			go waitForTokenFile(p, c.TokenPath, time.Now(), timeout)
+			m.pending = p
+			return p, nil
+		}
+		return nil, fmt.Errorf("cannot listen for the sign-in redirect on %s (is another program using that port?): %w", ru.Host, err)
 	}
 	// With port 0 (tests) the real port is only known after listening.
 	if ru.Port() == "0" {
@@ -204,6 +218,11 @@ func (m *LoginManager) Start() (*pendingLogin, error) {
 	}
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
 	mux := http.NewServeMux()
+	// Lets a second wakatime-durations process find this sign-in link.
+	mux.HandleFunc(pendingPath, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		io.WriteString(w, p.url)
+	})
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		qs := r.URL.Query()
 		if qs.Get("state") != state {
@@ -235,10 +254,6 @@ func (m *LoginManager) Start() (*pendingLogin, error) {
 	srv.Handler = mux
 	go srv.Serve(ln)
 
-	timeout := c.Timeout
-	if timeout <= 0 {
-		timeout = loginTimeout
-	}
 	go func() {
 		select {
 		case <-p.done:
@@ -256,6 +271,43 @@ func (m *LoginManager) Start() (*pendingLogin, error) {
 		_ = c.OpenBrowser(p.url)
 	}
 	return p, nil
+}
+
+// joinRunningLogin asks the process holding the redirect port for its
+// pending sign-in URL. Only loopback is contacted, never through a proxy.
+func joinRunningLogin(ru *url.URL, authorizeURL string) (string, error) {
+	hc := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	resp, err := hc.Get("http://" + ru.Host + pendingPath)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	if err != nil {
+		return "", err
+	}
+	u := strings.TrimSpace(string(b))
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(u, authorizeURL+"?") {
+		return "", errors.New("the process on the redirect port is not a wakatime-durations sign-in")
+	}
+	return u, nil
+}
+
+// waitForTokenFile completes a joined sign-in once the other process has
+// saved a new valid token.
+func waitForTokenFile(p *pendingLogin, path string, since time.Time, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if info, err := os.Stat(path); err == nil && !info.ModTime().Before(since.Add(-time.Second)) {
+			if t, err := loadToken(path); err == nil && t.valid(time.Now()) && !t.CreatedAt.Before(since.Add(-time.Second)) {
+				close(p.done)
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	p.err = errors.New("sign-in timed out; start it again")
+	close(p.done)
 }
 
 // Wait blocks until the sign-in finishes.

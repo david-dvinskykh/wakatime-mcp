@@ -229,24 +229,65 @@ func TestOAuthRefusedAndFailures(t *testing.T) {
 	}
 }
 
-func TestOAuthSecondProcessDoesNotOpenBrowser(t *testing.T) {
+func TestOAuthSecondProcessJoinsRunningLogin(t *testing.T) {
 	ts := httptest.NewServer(&fakeTokenServer{})
 	defer ts.Close()
 	spy1, spy2 := &browserSpy{}, &browserSpy{}
-	m1, _ := newLoginManager(t, ts.URL, spy1)
+	m1, tokenPath := newLoginManager(t, ts.URL, spy1)
 	p1, err := m1.Start()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Cursor may start the server twice; the second process gets the same
-	// fixed redirect port and must fail before opening a browser.
+	q := authorizeParams(t, p1.url)
+
+	// Cursor may run two server processes; both use the same fixed redirect
+	// port and the same token file.
 	m2, _ := newLoginManager(t, ts.URL, spy2)
-	m2.Config.RedirectURI = authorizeParams(t, p1.url).Get("redirect_uri")
-	if _, err := m2.Start(); err == nil {
-		t.Fatal("second listener on the same port must fail")
+	m2.Config.RedirectURI = q.Get("redirect_uri")
+	m2.Config.TokenPath = tokenPath
+	p2, err := m2.Start()
+	if err != nil {
+		t.Fatalf("second process must join the running sign-in: %v", err)
+	}
+	if p2.url != p1.url {
+		t.Fatalf("joined sign-in must return the same link:\n%s\n%s", p2.url, p1.url)
 	}
 	if spy2.count() != 0 {
-		t.Fatal("second process must not open a browser")
+		t.Fatal("second process must not open another browser tab")
+	}
+	if again, _ := m2.Start(); again != p2 {
+		t.Fatal("repeated Start must reuse the joined sign-in")
+	}
+
+	redirectBack(t, q.Get("redirect_uri"), url.Values{"code": {"good-code"}, "state": {q.Get("state")}})
+	if err := p1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- p2.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("joined sign-in failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("joined sign-in did not notice the saved token")
+	}
+	if a, err := resolveAuth(func(string) string { return "" }, t.TempDir(), tokenPath); err != nil || a.Header != "Bearer waka_tok_abc" {
+		t.Fatalf("second process must use the shared token: %+v %v", a, err)
+	}
+}
+
+func TestOAuthPortTakenByOtherProgram(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "something else")
+	}))
+	defer other.Close()
+	m, _ := newLoginManager(t, "http://127.0.0.1:1/unused", &browserSpy{})
+	m.Config.RedirectURI = other.URL + "/callback"
+	_, err := m.Start()
+	if err == nil || !strings.Contains(err.Error(), "another program") {
+		t.Fatalf("want a clear port error, got %v", err)
 	}
 }
 
@@ -346,5 +387,28 @@ func TestMCPAutoLoginAndPrompt(t *testing.T) {
 	// durations prompt, one from wakatime_login.
 	if logins != 3 {
 		t.Fatalf("want 3 Login calls, got %d", logins)
+	}
+}
+
+func TestMCPStartupLogsCredentialSource(t *testing.T) {
+	notified := make(chan string, 2)
+	srv := &Server{
+		Collect:        func(Options) ([]Row, error) { return nil, nil },
+		Login:          func() (string, error) { t.Error("must not sign in when credentials exist"); return "", nil },
+		HasCredentials: func() bool { return true },
+		Status:         func() string { return "Using api_key from /x/.wakatime.cfg (Basic)." },
+		Notify:         func(m string) { notified <- m },
+	}
+	in := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}` + "\n"
+	if err := serveMCP(strings.NewReader(in), io.Discard, srv); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case m := <-notified:
+		if !strings.Contains(m, "api_key from /x/.wakatime.cfg") || !strings.Contains(m, toolLogin) {
+			t.Fatalf("startup log must name the credential source and how to sign in: %q", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no startup log line")
 	}
 }

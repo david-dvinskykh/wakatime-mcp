@@ -107,14 +107,16 @@ func (s *Server) notify(msg string) {
 // no credentials exist, so signing in follows right after adding the server.
 func (s *Server) autoLogin() {
 	s.autoOnce.Do(func() {
-		if s.HasCredentials == nil || s.Login == nil || s.HasCredentials() {
+		if s.HasCredentials == nil || s.Login == nil {
+			return
+		}
+		if s.HasCredentials() {
+			s.notify("credentials: " + s.status() + " Automatic sign-in skipped; call " + toolLogin + " to sign in with OAuth instead.")
 			return
 		}
 		u, err := s.Login()
 		if err != nil {
-			if !errors.Is(err, errOAuthNotConfigured) {
-				s.notify("automatic sign-in not started: " + err.Error())
-			}
+			s.notify("not signed in and automatic sign-in not started: " + err.Error())
 			return
 		}
 		s.notify("not signed in; opened the WakaTime sign-in page. If no browser opened, visit: " + u)
@@ -135,7 +137,7 @@ func (s *Server) handle(req rpcRequest) rpcResponse {
 		resp.Result = map[string]any{
 			"protocolVersion": p.ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "wakatime-durations", "version": "1.1.0"},
+			"serverInfo":      map[string]any{"name": "wakatime-durations", "version": "1.2.0"},
 		}
 		go s.autoLogin()
 	case "ping":
