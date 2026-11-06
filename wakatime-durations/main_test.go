@@ -191,28 +191,28 @@ func TestAuthOrder(t *testing.T) {
 	getenv := func(k string) string { return env[k] }
 	b64 := func(s string) string { return "Basic " + base64.StdEncoding.EncodeToString([]byte(s)) }
 
-	a, err := resolveAuth(getenv, home)
+	a, err := resolveAuth(getenv, home, "")
 	if err != nil || a.Header != b64("home-key") {
 		t.Fatalf("home cfg: %v %q", err, a.Header)
 	}
 
 	os.WriteFile(filepath.Join(wh, ".wakatime.cfg"), []byte("[other]\napi_key = nope\n[settings]\napi_key=wh-key\n"), 0o600)
 	env["WAKATIME_HOME"] = wh
-	if a, _ = resolveAuth(getenv, home); a.Header != b64("wh-key") {
+	if a, _ = resolveAuth(getenv, home, ""); a.Header != b64("wh-key") {
 		t.Fatalf("WAKATIME_HOME cfg: %q", a.Header)
 	}
 
 	env["WAKATIME_API_KEY"] = "env-key"
-	if a, _ = resolveAuth(getenv, home); a.Header != b64("env-key") {
+	if a, _ = resolveAuth(getenv, home, ""); a.Header != b64("env-key") {
 		t.Fatalf("API key: %q", a.Header)
 	}
 
 	env["WAKATIME_ACCESS_TOKEN"] = "tok"
-	if a, _ = resolveAuth(getenv, home); a.Header != "Bearer tok" {
+	if a, _ = resolveAuth(getenv, home, ""); a.Header != "Bearer tok" {
 		t.Fatalf("access token: %q", a.Header)
 	}
 
-	if _, err := resolveAuth(func(string) string { return "" }, filepath.Join(dir, "none")); err != errNoCredentials {
+	if _, err := resolveAuth(func(string) string { return "" }, filepath.Join(dir, "none"), ""); err != errNoCredentials {
 		t.Fatalf("want errNoCredentials, got %v", err)
 	}
 }
@@ -309,7 +309,7 @@ func TestMCPFlow(t *testing.T) {
 		``,
 	}, "\n")
 	var out strings.Builder
-	if err := serveMCP(strings.NewReader(input), &out, collect); err != nil {
+	if err := serveMCP(strings.NewReader(input), &out, &Server{Collect: collect}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -335,7 +335,7 @@ func TestMCPFlow(t *testing.T) {
 	}
 	tools := resps[2]["result"].(map[string]any)["tools"].([]any)
 	tool := tools[0].(map[string]any)
-	if len(tools) != 1 || tool["name"] != toolName {
+	if len(tools) != 4 || tool["name"] != toolName {
 		t.Fatalf("bad tools/list: %v", tools)
 	}
 	req := tool["inputSchema"].(map[string]any)["required"].([]any)

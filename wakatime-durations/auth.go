@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Auth holds the Authorization header value and a human-readable name of
@@ -17,18 +18,25 @@ type Auth struct {
 }
 
 // errNoCredentials is returned when no credential source is available.
-var errNoCredentials = errors.New("no WakaTime credentials found: set WAKATIME_ACCESS_TOKEN (OAuth token with read_heartbeats scope), WAKATIME_API_KEY, or api_key in ~/.wakatime.cfg")
+var errNoCredentials = errors.New("no WakaTime credentials found: sign in with the wakatime_login tool (or -login), " +
+	"or set WAKATIME_ACCESS_TOKEN, WAKATIME_API_KEY, or api_key in ~/.wakatime.cfg")
 
 // resolveAuth picks credentials in this order:
 //  1. WAKATIME_ACCESS_TOKEN as Bearer
 //  2. WAKATIME_API_KEY as Basic
-//  3. api_key from $WAKATIME_HOME/.wakatime.cfg or ~/.wakatime.cfg as Basic
-func resolveAuth(getenv func(string) string, homeDir string) (Auth, error) {
+//  3. the token saved by the interactive OAuth sign-in, as Bearer
+//  4. api_key from $WAKATIME_HOME/.wakatime.cfg or ~/.wakatime.cfg as Basic
+func resolveAuth(getenv func(string) string, homeDir, tokenPath string) (Auth, error) {
 	if tok := strings.TrimSpace(getenv("WAKATIME_ACCESS_TOKEN")); tok != "" {
 		return Auth{Header: "Bearer " + tok, Method: "WAKATIME_ACCESS_TOKEN (Bearer)"}, nil
 	}
 	if key := strings.TrimSpace(getenv("WAKATIME_API_KEY")); key != "" {
 		return Auth{Header: basic(key), Method: "WAKATIME_API_KEY (Basic)"}, nil
+	}
+	if tokenPath != "" {
+		if t, err := loadToken(tokenPath); err == nil && t.valid(time.Now()) {
+			return Auth{Header: "Bearer " + t.AccessToken, Method: "OAuth sign-in token from " + tokenPath + " (Bearer)"}, nil
+		}
 	}
 	var candidates []string
 	if wh := strings.TrimSpace(getenv("WAKATIME_HOME")); wh != "" {

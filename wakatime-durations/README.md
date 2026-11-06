@@ -90,17 +90,70 @@ go build -trimpath -o ~/.local/bin/wakatime-durations .
 ~/.local/bin/wakatime-durations -install-cursor
 ```
 
+## Sign in with OAuth 2.0 (interactive)
+
+Cursor's own **Login** button only works for remote (`url`) MCP servers whose
+provider publishes OAuth discovery metadata; WakaTime publishes none, and this
+server runs over stdio. So the server signs you in itself, using the OAuth 2.0
+authorization-code flow with a redirect to `127.0.0.1`:
+
+- **Right after you save `mcp.json`.** Cursor starts the server; if it finds no
+  credentials, it opens the WakaTime consent page in your browser. Click
+  **Authorize** and the token is saved. If no browser opens, the link is in
+  **View → Output → MCP Logs**.
+- **On a tool call while not signed in** (or after a 401/403),
+  `wakatime_branch_durations` answers with the sign-in link instead of data.
+  Authorize, then ask again.
+- **Any time:** the `wakatime_login`, `wakatime_auth_status` and
+  `wakatime_logout` tools, or `wakatime-durations -login` / `-logout` in a
+  terminal.
+
+### One-time setup
+
+1. Create an app at https://wakatime.com/apps with redirect URI
+   `http://127.0.0.1:8977/callback`. If the form rejects it, use
+   `http://localhost:8977/callback` and set
+   `WAKATIME_OAUTH_REDIRECT_URI` to the same value.
+2. Put the app's ID and secret into the server entry in the global
+   `~/.cursor/mcp.json` (not a project's `.cursor/mcp.json`, which may be
+   committed):
+
+   ```json
+   "wakatime-durations": {
+     "command": "go",
+     "args": ["run", "github.com/david-dvinskykh/wakatime-mcp/wakatime-durations@latest"],
+     "env": {
+       "GOPROXY": "direct",
+       "WAKATIME_CLIENT_ID": "your-app-id",
+       "WAKATIME_CLIENT_SECRET": "your-app-secret"
+     }
+   }
+   ```
+
+   To keep the secret out of `mcp.json`, put the two `WAKATIME_CLIENT_*` lines
+   in a file and point `"envFile"` to its absolute path instead.
+3. Save. The browser opens; click **Authorize**. Check in chat with
+   `wakatime_auth_status`.
+
+The token is stored in
+`~/Library/Application Support/wakatime-durations/token.json` on macOS
+(`~/.config/wakatime-durations/token.json` on Linux), readable only by you.
+Override with `WAKATIME_TOKEN_FILE`. Requested scopes:
+`read_summaries,read_heartbeats`. Set `WAKATIME_NO_BROWSER=1` to only print the
+link.
+
 ## Credentials
 
 Checked in this order:
 
 1. `WAKATIME_ACCESS_TOKEN` – OAuth token, sent as `Authorization: Bearer`.
 2. `WAKATIME_API_KEY` – sent as `Authorization: Basic base64(key)`.
-3. `api_key` in the `[settings]` section of `$WAKATIME_HOME/.wakatime.cfg`,
+3. The token saved by the interactive sign-in – sent as Bearer.
+4. `api_key` in the `[settings]` section of `$WAKATIME_HOME/.wakatime.cfg`,
    then `~/.wakatime.cfg` – sent as Basic.
 
-If WakaTime answers 401 or 403, the tool stops (exit code 3) and says that an
-OAuth token with the `read_heartbeats` scope is needed.
+If WakaTime answers 401 or 403, the CLI stops (exit code 3); the MCP tool
+returns a sign-in link.
 
 ## CLI usage
 
