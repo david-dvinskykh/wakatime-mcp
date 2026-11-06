@@ -28,8 +28,9 @@ GOBIN="$HOME/.local/bin" go install github.com/david-dvinskykh/wakatime-mcp/waka
 Restart Cursor (or refresh it in **Settings → MCP**). That is all; see
 [Credentials](#credentials) for which key it uses.
 
-Run the same command again to update. Until this code is merged into the
-default branch, replace `@latest` with `@claude/wakatime-durations-tool-a8azah`.
+Run the same command again to update. `@latest` works once this directory is
+on the repository's default branch (or a `wakatime-durations/vX.Y.Z` tag
+exists); before that, use [Build from source](#build-from-source).
 
 ### npx-style alternative (no install step)
 
