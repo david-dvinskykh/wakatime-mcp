@@ -27,11 +27,38 @@ func run(args []string) int {
 	verbose := fs.Bool("v", false, "print the auth method (never the credential) to stderr")
 	installCursorFlag := fs.Bool("install-cursor", false, "register this binary as an MCP server in Cursor's mcp.json and exit")
 	cursorConfig := fs.String("cursor-config", "", "mcp.json to edit with -install-cursor (default ~/.cursor/mcp.json)")
+	login := fs.Bool("login", false, "sign in to WakaTime with OAuth 2.0 in the browser, save the token and exit")
+	logout := fs.Bool("logout", false, "delete the token saved by -login and exit")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
 	home, _ := os.UserHomeDir()
+	tokenPath := defaultTokenPath(os.Getenv)
+	logins := &LoginManager{Config: oauthConfigFromEnv(os.Getenv, tokenPath)}
+
+	if *login {
+		p, err := logins.Start()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "wakatime-durations:", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, "Opening the WakaTime sign-in page. If no browser opens, visit:\n"+p.url)
+		if err := p.Wait(); err != nil {
+			fmt.Fprintln(os.Stderr, "wakatime-durations:", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, "Signed in. Token saved to", tokenPath)
+		return 0
+	}
+	if *logout {
+		if err := deleteToken(tokenPath); err != nil {
+			fmt.Fprintln(os.Stderr, "wakatime-durations:", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, "Signed out. Deleted", tokenPath)
+		return 0
+	}
 
 	if *installCursorFlag {
 		exe, err := os.Executable()
@@ -54,7 +81,7 @@ func run(args []string) int {
 		return 0
 	}
 	collect := func(opt Options) ([]Row, error) {
-		auth, err := resolveAuth(os.Getenv, home)
+		auth, err := resolveAuth(os.Getenv, home, tokenPath)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +92,30 @@ func run(args []string) int {
 	}
 
 	if *date == "" {
-		if err := serveMCP(os.Stdin, os.Stdout, collect); err != nil {
+		srv := &Server{
+			Collect: collect,
+			Login: func() (string, error) {
+				p, err := logins.Start()
+				if err != nil {
+					return "", err
+				}
+				return p.url, nil
+			},
+			HasCredentials: func() bool {
+				_, err := resolveAuth(os.Getenv, home, tokenPath)
+				return err == nil
+			},
+			Status: func() string {
+				auth, err := resolveAuth(os.Getenv, home, tokenPath)
+				if err != nil {
+					return "Not signed in. " + err.Error()
+				}
+				return "Using " + auth.Method + "."
+			},
+			Logout: func() error { return deleteToken(tokenPath) },
+			Notify: func(msg string) { fmt.Fprintln(os.Stderr, "wakatime-durations:", msg) },
+		}
+		if err := serveMCP(os.Stdin, os.Stdout, srv); err != nil {
 			fmt.Fprintln(os.Stderr, "wakatime-durations:", err)
 			return 1
 		}
